@@ -61,6 +61,11 @@ Run
   --key <k>            API key (prefer OH_HARNESS_GEMINI_KEY or the config file)
   --provider <name>    gemini | openai | anthropic | openai-compatible
   --model <name>
+  --record [name]      record real model responses to cassettes/<name>
+  --replay [name]      replay them: no network, no quota, deterministic
+  --replay-mode strict|auto   strict fails on a miss (a changed prompt), auto falls through
+  --max-ai-calls <n>   ceiling for this run
+  --max-ai-calls-per-day <n>  ceiling shared across runs, survives restarts
   --geometry stock|full
   --fixture <gameId>   seed from a real save in the main checkout
   --force              run AI-only scenarios against the fallback
@@ -181,8 +186,29 @@ const main = async () => {
     process.env.GEMINI_API_KEY ??
     readConfigKey();
 
+  // Replay needs provider calls routed to the hook even with no key, since a
+  // cassette answers without the network.
+  const ai = options.replay ? "replay" : options.ai === "live" || options.ai === true ? "live" : "off";
+
+  if (ai === "live" && !apiKey) {
+    say("No API key found. Set one of:");
+    say("  OH_HARNESS_GEMINI_KEY=<key>            (environment)");
+    say(`  ${path.join(process.env.USERPROFILE ?? "~", ".open-historia-harness.json")}   {"gemini":{"apiKey":"..."}}`);
+    say("  harness.config.json in this repo       (gitignored)");
+    say("");
+    say("Or run without --ai to use the deterministic fallback, which costs nothing.");
+    return EXIT.error;
+  }
+
   const result = await runScenarios(names, {
-    ai: options.ai === "live" || options.ai === true ? "live" : "off",
+    ai,
+    cassetteMode: options.record ? "record" : options.replay ? "replay" : "off",
+    cassetteName: (typeof options.record === "string" && options.record) ||
+      (typeof options.replay === "string" && options.replay) ||
+      "default",
+    replayMode: options.replayMode ?? "auto",
+    maxAiCalls: Number(options.maxAiCalls ?? 0),
+    maxAiCallsPerDay: Number(options.maxAiCallsPerDay ?? 0),
     repo: options.repo,
     branch: options.branch ?? null,
     fresh: Boolean(options.freshWorktree),
@@ -199,6 +225,12 @@ const main = async () => {
   });
 
   say("");
+  if (result.quota?.spentThisRun) {
+    say(`quota: ${result.quota.spentThisRun} calls this run, ${result.quota.spentToday} today`);
+  }
+  if (result.cassette && (result.cassette.recorded || result.cassette.hits)) {
+    say(`cassette: ${result.cassette.recorded} recorded, ${result.cassette.hits} replayed, ${result.cassette.misses} missed`);
+  }
   say(result.summaryLine);
   return result.exitCode;
 };
