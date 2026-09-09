@@ -26,6 +26,36 @@ node cli.js smoke --compare main,upstream/custom-stats
 No API key is needed for any of that. Without one the engine uses its own deterministic fallback
 turn, which exercises the whole game except the model itself.
 
+## Hunting for bugs
+
+```
+node cli.js --levels                       what each level does, which saves exist
+node cli.js --hunt --level 2               play like an impatient player
+node cli.js --hunt --level 2 --saves all   fresh scenario plus every real save
+node cli.js --hunt --level 4 --saves modern-day-session --seed 777
+```
+
+Level 1 plays like a normal player; level 5 actively tries to break things. The
+ladder exists so severity means something: **a bug found at level 1 is urgent
+because a real player will hit it**, while one found at level 5 may be worth
+nothing.
+
+After every single action the world is checked against a set of invariants — no
+owner is a country code, no unit is at null island or off the earth, regions do
+not vanish, the clock does not run backwards, names are not narrative text. A
+finding is an invalid *state*, not a thrown error: levels 4 and 5 deliberately
+feed the engine nonsense, and rejecting nonsense is correct behaviour.
+
+`BUG-REPORT.md` is **rewritten in full after every finding**, so it is valid at
+every instant. If the agent driving it times out, the report on disk still
+describes everything found up to that moment.
+
+It separates problems the run *caused* from ones **already in the save** — telling
+someone their code broke something that was already broken sends them hunting
+through the wrong file.
+
+If an AI agent is driving this, point it at [AGENTS.md](AGENTS.md).
+
 ## The three things it is for
 
 **Seeing the game as data.** `world.snapshot()` returns ownership, units, events, polities and

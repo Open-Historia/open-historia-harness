@@ -4,6 +4,7 @@
 // Optimised for one thing: I type one command and get back readable structured
 // text. Everything else is in service of that.
 
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -17,6 +18,8 @@ import { DEFAULT_GAME_REPO, findGameRepo } from "./lib/target.js";
 import { pruneWorktrees } from "./lib/worktree.js";
 import { detectBlockers } from "./lib/compat.js";
 import { compareBranches, renderComparison } from "./lib/compare.js";
+import { runBugHunt, listRealSaves, resolveSaves } from "./lib/huntRunner.js";
+import { describeLevel, LEVELS } from "./lib/levels.js";
 
 const EXIT = { ok: 0, assertion: 1, error: 2, quota: 3, budget: 4, compat: 5, interrupted: 6 };
 
@@ -50,6 +53,8 @@ oh-harness — headless test harness for Open Historia
   oh-harness --status                    every run, its state, how to resume
   oh-harness --doctor                    recover interrupted runs, audit, clean up
   oh-harness --prune                     drop stale sandboxes and worktrees
+  oh-harness --hunt --level 1..5         hunt for bugs; writes a bug report as it goes
+  oh-harness --levels                    what each level does, and which saves exist
   oh-harness --verify-compat             report which import blockers a target has
   oh-harness <scenario> --compare a,b    run the same scenario against two branches
 
@@ -57,6 +62,13 @@ Target
   --repo <path>        game repo (default: ../open-historia)
   --branch <ref>       test a branch in a throwaway worktree (e.g. upstream/main)
   --fresh-worktree     rebuild the worktree instead of reusing it
+
+Bug hunt
+  --hunt               play the game looking for bugs, writing BUG-REPORT.md as it goes
+  --level 1..5         1 plays like a normal player, 5 actively tries to break things
+  --saves fresh|all|saves|<id,...>   which save(s) to hunt in (default fresh)
+  --turns <n>          override the level's turn count
+  --seed <n>           reproduce an earlier hunt exactly
 
 Run
   --ai off|live        provider calls (default: off, uses the deterministic fallback)
@@ -78,6 +90,28 @@ Run
 `;
 
 const say = (text) => console.log(text);
+
+const sayNoKey = () => {
+  say("No API key found. Set one of:");
+  say("  OH_HARNESS_GEMINI_KEY=<key>            (environment)");
+  say(`  ${path.join(process.env.USERPROFILE ?? "~", ".open-historia-harness.json")}   {"gemini":{"apiKey":"..."}}`);
+  say("  harness.config.json in this repo       (gitignored)");
+  say("");
+  say("Or run without --ai to use the deterministic fallback, which costs nothing.");
+};
+
+const cmdLevels = () => {
+  const gameRepo = findGameRepo();
+  for (const [level, spec] of Object.entries(LEVELS)) {
+    say(`  ${level}  ${spec.name.padEnd(14)} ${spec.description}`);
+  }
+  say("");
+  say("Saves available to hunt in:");
+  say("  fresh                     a clean scenario (default)");
+  for (const save of listRealSaves(gameRepo)) say(`  ${save}`);
+  say("  all                       fresh plus every save above");
+  return EXIT.ok;
+};
 
 const cmdList = () => {
   const scenarios = listScenarios();
@@ -170,11 +204,81 @@ const main = async () => {
     return EXIT.ok;
   }
   if (options.list) return cmdList();
+  if (options.levels) return cmdLevels();
   if (options.status) return cmdStatus();
   if (options.doctor) return cmdDoctor();
   if (options.prune) return cmdPrune(options);
   if (options.verifyCompat) return cmdVerifyCompat(options);
   if (options.resume) return cmdResume(String(options.resume));
+
+  if (options.hunt || options.level !== undefined) {
+    const level = Math.max(1, Math.min(5, Number(options.level ?? 1)));
+    const gameRepo = findGameRepo(options.repo);
+    const saveList = resolveSaves(options.saves ?? "fresh", gameRepo);
+    const seed = Number(options.seed ?? Date.now() % 100000);
+
+    const apiKey =
+      options.key ?? process.env.OH_HARNESS_GEMINI_KEY ?? process.env.GEMINI_API_KEY ?? readConfigKey();
+    const ai = options.ai === "live" || options.ai === true ? "live" : "off";
+    if (ai === "live" && !apiKey) {
+      sayNoKey();
+      return EXIT.error;
+    }
+
+    // One save per process: server.js starts on import and is cached, so a second
+    // save in the same process would find a closed listener. The loop re-invokes
+    // this CLI rather than pretending otherwise.
+    const reports = [];
+    for (const [index, save] of saveList.entries()) {
+      if (index > 0) {
+        const child = spawnSync(
+          process.execPath,
+          [
+            process.argv[1],
+            "--hunt",
+            "--level", String(level),
+            "--saves", save ?? "fresh",
+            "--seed", String(seed + index),
+            ...(ai === "live" ? ["--ai", "live"] : []),
+            ...(options.turns ? ["--turns", String(options.turns)] : []),
+            ...(options.repo ? ["--repo", String(options.repo)] : []),
+          ],
+          { stdio: "inherit" },
+        );
+        if (child.status !== 0) reports.push({ save, failed: true });
+        continue;
+      }
+
+      const result = await runBugHunt({
+        level,
+        seed: seed + index,
+        saves: save ?? "fresh",
+        turns: options.turns ? Number(options.turns) : null,
+        ai,
+        provider: options.provider ?? "gemini",
+        model: options.model ?? "",
+        apiKey: apiKey ?? "",
+        repo: options.repo,
+        branch: options.branch ?? null,
+        sandboxRoot: DEFAULT_SANDBOX_ROOT,
+        runsDir: RUNS_DIR,
+        harnessRoot: HARNESS_ROOT,
+        maxAiCalls: Number(options.maxAiCalls ?? 0),
+        cassetteMode: options.record ? "record" : "off",
+        command: `node cli.js --hunt --level ${level} --saves ${save ?? "fresh"} --seed ${seed + index}` +
+          (ai === "live" ? " --ai live" : ""),
+        quiet: Boolean(options.quiet),
+      });
+      reports.push(result);
+      say("");
+      say(result.summary);
+      say("");
+      say(`Bug report: ${result.reportFile}`);
+    }
+
+    const worst = reports.find((r) => r.exitCode === 1);
+    return worst ? EXIT.assertion : EXIT.ok;
+  }
 
   if (options.compare) {
     const branches = String(options.compare).split(",").map((s) => s.trim()).filter(Boolean);
@@ -211,12 +315,7 @@ const main = async () => {
   const ai = options.replay ? "replay" : options.ai === "live" || options.ai === true ? "live" : "off";
 
   if (ai === "live" && !apiKey) {
-    say("No API key found. Set one of:");
-    say("  OH_HARNESS_GEMINI_KEY=<key>            (environment)");
-    say(`  ${path.join(process.env.USERPROFILE ?? "~", ".open-historia-harness.json")}   {"gemini":{"apiKey":"..."}}`);
-    say("  harness.config.json in this repo       (gitignored)");
-    say("");
-    say("Or run without --ai to use the deterministic fallback, which costs nothing.");
+    sayNoKey();
     return EXIT.error;
   }
 
