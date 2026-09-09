@@ -78,6 +78,8 @@ Read `BUG-REPORT.md` and **summarise it in your own words**. Do not paste the fi
 Lead with what matters:
 
 - Anything under **Crashes** first. An exception escaping the engine is always real.
+- Note that repeated findings of the same kind are **grouped**: "31 instances, e.g.
+  Two events share the id e1" is one problem affecting 31 things, not 31 problems.
 - Then findings **caused by the run**, worst severity first.
 - Then, briefly, anything **already present in the save** — flagging clearly that
   the run did not cause it.
@@ -104,6 +106,12 @@ reproduce an earlier hunt exactly, `--max-ai-calls <n>` to cap spend,
 `--record <name>` to save the model's responses for replay.
 
 The report is written to `runs/<timestamp>-hunt-L<level>/BUG-REPORT.md`.
+
+**With `--saves all` you get one report per save**, because each runs in its own
+process (the game server starts on import and is cached, so one server per
+process). The run ends with a combined table on stdout and an index at
+`runs/HUNT-INDEX-L<level>.md` listing every save and its report. Read the index
+first, then open only the reports that have findings.
 
 ---
 

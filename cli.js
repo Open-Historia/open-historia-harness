@@ -19,7 +19,7 @@ import { pruneWorktrees } from "./lib/worktree.js";
 import { detectBlockers } from "./lib/compat.js";
 import { compareBranches, renderComparison } from "./lib/compare.js";
 import { runBugHunt, listRealSaves, resolveSaves } from "./lib/huntRunner.js";
-import { describeLevel, LEVELS } from "./lib/levels.js";
+import { LEVELS } from "./lib/levels.js";
 
 const EXIT = { ok: 0, assertion: 1, error: 2, quota: 3, budget: 4, compat: 5, interrupted: 6 };
 
@@ -50,7 +50,7 @@ oh-harness — headless test harness for Open Historia
 
   oh-harness <scenario...> [options]     run scenarios
   oh-harness --list                      list scenarios
-  oh-harness --status                    every run, its state, how to resume
+  oh-harness --status                    every run, its state, and its report
   oh-harness --doctor                    recover interrupted runs, audit, clean up
   oh-harness --prune                     drop stale sandboxes and worktrees
   oh-harness --hunt --level 1..5         hunt for bugs; writes a bug report as it goes
@@ -86,6 +86,7 @@ Run
   --keep               keep the sandbox and worktree for inspection
   --max-runtime <min>  absolute ceiling (default 30)
   --idle-timeout <min> give up if no step completes (default 5)
+  --self-test          run every offline scenario
   --quiet
 `;
 
@@ -111,6 +112,32 @@ const cmdLevels = () => {
   for (const save of listRealSaves(gameRepo)) say(`  ${save}`);
   say("  all                       fresh plus every save above");
   return EXIT.ok;
+};
+
+/** One file listing every save hunted in this invocation and where its report is. */
+const writeHuntIndex = ({ reports, runsDir, level, seed }) => {
+  const file = path.join(runsDir, `HUNT-INDEX-L${level}.md`);
+  const lines = [
+    `# Bug hunt index — level ${level}`,
+    "",
+    `Seed ${seed}. ${reports.length} saves hunted. Each has its own BUG-REPORT.md.`,
+    "",
+    "| Save | Result | Report |",
+    "|---|---|---|",
+  ];
+  for (const entry of reports) {
+    const label = entry.save ?? "fresh scenario";
+    const total = entry.fromChild ? entry.total : entry.findings.length;
+    const critical = entry.fromChild ? entry.critical : entry.findings.filter((f) => f.severity === "critical").length;
+    const high = entry.fromChild ? entry.high : entry.findings.filter((f) => f.severity === "high").length;
+    const report = entry.reportFile
+      ? (entry.fromChild ? entry.reportFile : path.relative(runsDir, entry.reportFile))
+      : "see runs/";
+    lines.push(`| ${label} | ${total} findings (${critical} critical, ${high} high) | ${report} |`);
+  }
+  lines.push("");
+  fs.writeFileSync(file, `${lines.join("\n")}\n`);
+  return file;
 };
 
 const cmdList = () => {
@@ -243,9 +270,30 @@ const main = async () => {
             ...(options.turns ? ["--turns", String(options.turns)] : []),
             ...(options.repo ? ["--repo", String(options.repo)] : []),
           ],
-          { stdio: "inherit" },
+          { encoding: "utf8" },
         );
-        if (child.status !== 0) reports.push({ save, failed: true });
+        // Capture rather than inherit, so the parent can read the child's own
+        // summary line. Reporting only the exit code made a save with 32 findings
+        // print as "no blocking findings", because nothing critical had failed —
+        // technically true and thoroughly misleading.
+        if (child.stdout) process.stdout.write(child.stdout);
+        if (child.stderr) process.stderr.write(child.stderr);
+
+        const line = /HUNT .*$/m.exec(child.stdout ?? "")?.[0] ?? "";
+        // `\\d`, not `\d`: inside a template literal `\d` is not an escape
+        // sequence and collapses to a bare "d", so the pattern silently became
+        // `findings=(d+)` and matched nothing — every child reported zero.
+        const num = (key) => Number(new RegExp(`${key}=(\\d+)`).exec(line)?.[1] ?? 0);
+        reports.push({
+          save,
+          exitCode: child.status ?? 0,
+          fromChild: true,
+          total: num("findings"),
+          critical: num("critical"),
+          high: num("high"),
+          crashes: num("crashes"),
+          reportFile: /report=(\S+)/.exec(line)?.[1] ?? null,
+        });
         continue;
       }
 
@@ -274,6 +322,27 @@ const main = async () => {
       say(result.summary);
       say("");
       say(`Bug report: ${result.reportFile}`);
+    }
+
+    if (reports.length > 1) {
+      const index = writeHuntIndex({ reports, runsDir: RUNS_DIR, level, seed });
+      say("");
+      say("=".repeat(60));
+      say(`Hunted ${reports.length} saves at level ${level}.`);
+      for (const entry of reports) {
+        const label = entry.save ?? "fresh";
+        const total = entry.fromChild ? entry.total : entry.findings.length;
+        const critical = entry.fromChild ? entry.critical : entry.findings.filter((f) => f.severity === "critical").length;
+        const high = entry.fromChild ? entry.high : entry.findings.filter((f) => f.severity === "high").length;
+        const crashes = entry.fromChild ? entry.crashes : entry.crashes?.length ?? 0;
+        say(
+          `  ${label.padEnd(38)} ${String(total).padStart(3)} findings` +
+            `  (${critical} critical, ${high} high${crashes ? `, ${crashes} CRASHES` : ""})`,
+        );
+      }
+      say("");
+      say(`Combined index: ${index}`);
+      say("Each save has its own BUG-REPORT.md; the index lists them all.");
     }
 
     const worst = reports.find((r) => r.exitCode === 1);

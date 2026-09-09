@@ -98,8 +98,10 @@ an NTFS junction, and `public/assets` (223 MB) is shared read-only via `OH_ASSET
 ever copied.
 
 Sharing modules across branches is a lie when the branch wants different versions, so the lockfiles
-are compared and a mismatch is a loud warning naming `--npm-ci`. It fires for real: `upstream/main`
-and `wiki` currently have different `package-lock.json` files.
+are compared and a mismatch is reported as a loud warning. It fires for real: `upstream/main` and
+`wiki` currently have different `package-lock.json` files. When that happens, the run is still
+using the main checkout's dependency tree — if a result looks strange, run `npm ci` inside the
+worktree by hand before trusting it.
 
 ## No game source is modified
 
