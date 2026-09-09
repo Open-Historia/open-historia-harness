@@ -16,6 +16,7 @@ import { configureSafety, resetSafety } from "./lib/safety.js";
 import { DEFAULT_GAME_REPO, findGameRepo } from "./lib/target.js";
 import { pruneWorktrees } from "./lib/worktree.js";
 import { detectBlockers } from "./lib/compat.js";
+import { compareBranches, renderComparison } from "./lib/compare.js";
 
 const EXIT = { ok: 0, assertion: 1, error: 2, quota: 3, budget: 4, compat: 5, interrupted: 6 };
 
@@ -50,6 +51,7 @@ oh-harness — headless test harness for Open Historia
   oh-harness --doctor                    recover interrupted runs, audit, clean up
   oh-harness --prune                     drop stale sandboxes and worktrees
   oh-harness --verify-compat             report which import blockers a target has
+  oh-harness <scenario> --compare a,b    run the same scenario against two branches
 
 Target
   --repo <path>        game repo (default: ../open-historia)
@@ -173,6 +175,24 @@ const main = async () => {
   if (options.prune) return cmdPrune(options);
   if (options.verifyCompat) return cmdVerifyCompat(options);
   if (options.resume) return cmdResume(String(options.resume));
+
+  if (options.compare) {
+    const branches = String(options.compare).split(",").map((s) => s.trim()).filter(Boolean);
+    if (branches.length !== 2) {
+      say("--compare takes two refs, e.g. --compare main,upstream/custom-stats");
+      return EXIT.error;
+    }
+    const scenario = options._.length ? options._ : ["smoke"];
+    const comparison = await compareBranches({
+      scenario,
+      branches,
+      harnessRoot: HARNESS_ROOT,
+      cliPath: path.join(HARNESS_ROOT, "cli.js"),
+      ai: options.ai === "live" ? "live" : "off",
+    });
+    say(renderComparison(comparison));
+    return comparison.differs ? EXIT.assertion : EXIT.ok;
+  }
 
   const names = options._.length ? options._ : options.selfTest ? listScenarios() : [];
   if (!names.length) {

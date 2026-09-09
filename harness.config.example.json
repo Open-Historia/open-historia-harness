@@ -1,0 +1,9 @@
+{
+  "_comment": "Copy to harness.config.json (gitignored), or better: put it at %USERPROFILE%/.open-historia-harness.json so no .gitignore mistake can ever expose it.",
+  "provider": "gemini",
+  "gemini": { "apiKey": "", "model": "gemini-3.5-flash-lite" },
+  "openaiCompatible": { "endpoint": "http://localhost:11434/v1", "model": "" },
+  "rateLimit": { "minGapMs": 6500, "maxRetries": 3 },
+  "budget": { "perRun": 0, "perDay": 0 },
+  "reasoning": false
+}
