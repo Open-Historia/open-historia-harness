@@ -1,0 +1,16 @@
+node_modules/
+
+# Holds a real API key.
+harness.config.json
+
+# Run output. Reports are small and worth keeping locally, but they are records
+# of a local run, not source.
+runs/
+
+# Recorded AI traffic. System prompts are 50-200 KB each, so a handful of runs
+# is megabytes. Curated recordings are promoted into fixtures/cassettes/ and
+# committed from there instead.
+cassettes/
+
+# Throwaway game data and git worktrees. Large, and recreated on every run.
+sandbox/
