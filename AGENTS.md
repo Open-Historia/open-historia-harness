@@ -174,6 +174,42 @@ harness lists the last steps before each finding.
 
 ---
 
+## Committing to this repo
+
+These are hard rules, the same as the game repo's (`docs/conventions.md` there).
+
+### No AI attribution — ever
+
+**Do not add `Co-Authored-By: Claude …` trailers, `Generated with Claude Code`
+footers, or any AI-attribution line** to commit messages or PR bodies. This
+applies whether or not an AI tool touched the change. Commits and PRs read as
+authored by a human contributor, full stop.
+
+### Author identity
+
+Commit under **your own GitHub-linked identity**, with your GitHub `noreply`
+email (`<id>+<user>@users.noreply.github.com`) so commits attribute to your
+account without publishing a real address. Do not impersonate another
+contributor's name or email.
+
+### Nothing personal or local
+
+The repo is public. Do not commit:
+
+- names, home-directory paths, email addresses, or anything else that identifies
+  the person running the harness. In comments, write "the user", not a name;
+- API keys, even free-tier or revoked ones. Keys belong in
+  `%USERPROFILE%\.open-historia-harness.json`;
+- anything a local run produced: `runs/`, `sandbox/`, `cassettes/`, bug reports,
+  journals, and data copied out of real saves;
+- one-off local scenarios and their fixtures. Name them `<name>.local.js`, which
+  is gitignored.
+
+Check `git status` before every commit; `.gitignore` covers all of the above, so
+anything that shows up there that you did not write on purpose is a warning.
+
+---
+
 ## If something goes wrong
 
 | Symptom | What it means |

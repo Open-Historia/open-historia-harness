@@ -221,6 +221,10 @@ export default async ({ game, world, inspect, expect, log }) => {
 
 `expect` collects rather than throwing on first failure, so one run reports every problem.
 
+A scenario written for a one-off local investigation, such as a player's report or an unmerged game
+branch, should be named `<name>.local.js`. That name is gitignored, along with `scenarios/fixtures/`,
+so neither can be pushed by accident. It still runs as `node cli.js <name>.local`.
+
 **`expect.generatedByAi` is the sharpest verb here.** A fallback turn looks like a success from the
 outside — the round advances, events appear, state persists — and only `generation.source` reveals
 the model never answered.
@@ -243,3 +247,9 @@ npm test
 
 Everything, including the offline scenario library. The game's own `npm test` is untouched and stays
 exactly as fast as it was.
+
+## Contributing
+
+Commit rules are in [AGENTS.md](AGENTS.md#committing-to-this-repo) and match the game repo's: **no AI
+attribution** in commits or PRs (no `Co-Authored-By: Claude` trailers, no "Generated with Claude Code"
+footers), commit under your GitHub `noreply` identity, and nothing personal or produced by a local run.
