@@ -2,10 +2,20 @@ node_modules/
 
 # Holds a real API key.
 harness.config.json
+.env
+.env.*
 
 # Run output. Reports are small and worth keeping locally, but they are records
 # of a local run, not source.
 runs/
+
+# The same reports if they are ever written, or copied, outside runs/. They
+# describe someone's own saves, so they never belong in the repo.
+BUG-REPORT.md
+RESUME.md
+HUNT-INDEX-*.md
+journal.jsonl
+*.log
 
 # Recorded AI traffic. System prompts are 50-200 KB each, so a handful of runs
 # is megabytes. Curated recordings are promoted into fixtures/cassettes/ and
@@ -14,3 +24,18 @@ cassettes/
 
 # Throwaway game data and git worktrees. Large, and recreated on every run.
 sandbox/
+
+# Local-only testing: one-off investigations of player reports and game feature
+# branches, and the data they were built from. Name a scenario `<name>.local.js`
+# to keep it out of the repo; it still runs as `node cli.js <name>.local`.
+*.local.*
+scenarios/fixtures/
+scenarios/fallback-reports.js
+scenarios/save-logging-file.js
+
+# Personal agent and editor settings.
+CLAUDE.md
+.claude/settings.local.json
+.vscode/
+.idea/
+.DS_Store
