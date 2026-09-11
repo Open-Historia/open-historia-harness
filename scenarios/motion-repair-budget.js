@@ -16,7 +16,7 @@
 // OH_SKIP_DAYS      default 365.
 //
 // Needs --ai live (the main simulation must answer for storylines to be judged at
-// all), and a save: --fixture uk-empire-continuation-session. The storylines are
+// all), and a save: --fixture <gameId>, any real save. The storylines are
 // written into the sandbox copy only.
 
 export const meta = {
