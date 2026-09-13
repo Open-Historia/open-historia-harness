@@ -286,3 +286,10 @@ exactly as fast as it was.
 Commit rules are in [AGENTS.md](AGENTS.md#committing-to-this-repo) and match the game repo's: **no AI
 attribution** in commits or PRs (no `Co-Authored-By: Claude` trailers, no "Generated with Claude Code"
 footers), commit under your GitHub `noreply` identity, and nothing personal or produced by a local run.
+
+## Licence
+
+[AGPL-3.0-or-later](LICENSE), the same as Open Historia. The harness runs the game's own code in its
+process, and a few parts are adapted from the game's source — key redaction from `server/logStore.js`,
+and the hub download from `communityHub.jsx`. Those files say so, with the game's copyright notice. By
+contributing, you agree your contribution is licensed the same way.
