@@ -18,6 +18,10 @@ import { DEFAULT_GAME_REPO, findGameRepo } from "./lib/target.js";
 import { pruneWorktrees } from "./lib/worktree.js";
 import { detectBlockers } from "./lib/compat.js";
 import { compareBranches, renderComparison } from "./lib/compare.js";
+import { checkExports, checkOneExport } from "./lib/checkExports.js";
+import { pruneHubCache } from "./lib/hubScenario.js";
+import { exportsDir, inspectZipFile, listGameExports, resolveSaveZip } from "./lib/gameExport.js";
+import { hideHomeDir } from "./lib/redact.js";
 import { runBugHunt, listRealSaves, resolveSaves } from "./lib/huntRunner.js";
 import { LEVELS } from "./lib/levels.js";
 
@@ -57,6 +61,7 @@ oh-harness — headless test harness for Open Historia
   oh-harness --levels                    what each level does, and which saves exist
   oh-harness --verify-compat             report which import blockers a target has
   oh-harness <scenario> --compare a,b    run the same scenario against two branches
+  oh-harness --check-exports             open every Game export in game-exports/, no turns played
 
 Target
   --repo <path>        game repo (default: ../open-historia)
@@ -67,6 +72,11 @@ Bug hunt
   --hunt               play the game looking for bugs, writing BUG-REPORT.md as it goes
   --level 1..5         1 plays like a normal player, 5 actively tries to break things
   --saves fresh|all|saves|<id,...>   which save(s) to hunt in (default fresh)
+
+Game exports (a player's exported .zip; hunts and scenario runs)
+  --save-zip <path|name>   open a Game export: a path, or its name in game-exports/
+  --no-embedded-scenario   play on the Stand-in scenario even when the zip carries its map
+  --no-hub                 do not download a Hub scenario the zip points to
   --turns <n>          override the level's turn count
   --seed <n>           reproduce an earlier hunt exactly
 
@@ -92,6 +102,42 @@ Run
 
 const say = (text) => console.log(text);
 
+/**
+ * --save-zip, checked before anything boots: one Game export, found by path or
+ * by short name in game-exports/, and actually a zip. A problem with the file is
+ * reported as a sentence naming it, never as a stack trace.
+ */
+const prepareSaveZip = (options) => {
+  if (options.saveZip === undefined) return { file: null };
+  if (options.saves !== undefined || options.fixture !== undefined) {
+    say("--save-zip opens one Game export on its own; it cannot be combined with --saves or --fixture.");
+    return { exit: EXIT.error };
+  }
+  try {
+    const file = resolveSaveZip(options.saveZip === true ? "" : options.saveZip);
+    inspectZipFile(file);
+    return { file };
+  } catch (error) {
+    if (!error.harnessExport) throw error;
+    say(error.message);
+    return { exit: EXIT.error };
+  }
+};
+
+/**
+ * How a reproduce command names the zip: by short name when it is in
+ * game-exports/, otherwise by path with the home folder hidden — a report is
+ * often pasted into a public issue.
+ */
+const saveZipArg = (file) => {
+  const relative = path.relative(exportsDir(), file);
+  if (!relative.startsWith("..") && !path.isAbsolute(relative)) {
+    return relative.replace(/\.zip$/i, "").split(path.sep).join("/");
+  }
+  const shown = hideHomeDir(file);
+  return /\s/.test(shown) ? `"${shown}"` : shown;
+};
+
 const sayNoKey = () => {
   say("No API key found. Set one of:");
   say("  OH_HARNESS_GEMINI_KEY=<key>            (environment)");
@@ -111,6 +157,11 @@ const cmdLevels = () => {
   say("  fresh                     a clean scenario (default)");
   for (const save of listRealSaves(gameRepo)) say(`  ${save}`);
   say("  all                       fresh plus every save above");
+  say("");
+  const exports = listGameExports();
+  say(`Game exports to open with --save-zip <name> (in ${hideHomeDir(exportsDir())}):`);
+  if (!exports.length) say("  (none yet: put a player's zip there, or run export-round-trip)");
+  for (const name of exports) say(`  ${name}`);
   return EXIT.ok;
 };
 
@@ -143,6 +194,8 @@ const writeHuntIndex = ({ reports, runsDir, level, seed }) => {
 const cmdList = () => {
   const scenarios = listScenarios();
   say(scenarios.length ? scenarios.map((name) => `  ${name}`).join("\n") : "  (no scenarios yet)");
+  say("");
+  say("Any of them can run on a player's Game export: --save-zip <path, or name in game-exports/>.");
   return EXIT.ok;
 };
 
@@ -179,9 +232,10 @@ const cmdDoctor = () => {
   configureSafety({ sandbox: DEFAULT_SANDBOX_ROOT, protect: [gameRepo, DEFAULT_GAME_REPO] });
   const worktrees = pruneWorktrees({ gameRepo, sandboxRoot: DEFAULT_SANDBOX_ROOT });
   const sandboxes = pruneSandboxes({ keepDays: 14 });
+  const hubMaps = pruneHubCache({ keepDays: 14 });
   resetSafety();
 
-  say(`removed ${worktrees.length} worktree(s), ${sandboxes.length} stale sandbox(es)`);
+  say(`removed ${worktrees.length} worktree(s), ${sandboxes.length} stale sandbox(es), ${hubMaps.length} cached hub map(s)`);
   return EXIT.ok;
 };
 
@@ -190,8 +244,9 @@ const cmdPrune = (options) => {
   configureSafety({ sandbox: DEFAULT_SANDBOX_ROOT, protect: [gameRepo, DEFAULT_GAME_REPO] });
   const worktrees = pruneWorktrees({ gameRepo, sandboxRoot: DEFAULT_SANDBOX_ROOT });
   const sandboxes = pruneSandboxes({ keepDays: Number(options.keepDays ?? 14) });
+  const hubMaps = pruneHubCache({ keepDays: Number(options.keepDays ?? 14) });
   resetSafety();
-  say(`removed ${worktrees.length} worktree(s), ${sandboxes.length} sandbox(es)`);
+  say(`removed ${worktrees.length} worktree(s), ${sandboxes.length} sandbox(es), ${hubMaps.length} cached hub map(s)`);
   return EXIT.ok;
 };
 
@@ -236,12 +291,34 @@ const main = async () => {
   if (options.doctor) return cmdDoctor();
   if (options.prune) return cmdPrune(options);
   if (options.verifyCompat) return cmdVerifyCompat(options);
+  if (options.checkExports) {
+    return checkExports({
+      dir: exportsDir(),
+      cliPath: path.join(HARNESS_ROOT, "cli.js"),
+      runsDir: RUNS_DIR,
+      repo: options.repo ?? null,
+      branch: options.branch ?? null,
+    });
+  }
+  // Internal: one --check-exports child, for one zip.
+  if (options.checkExport) {
+    await checkOneExport({
+      file: String(options.checkExport),
+      repo: options.repo,
+      branch: options.branch ?? null,
+      sandboxRoot: DEFAULT_SANDBOX_ROOT,
+    });
+    return EXIT.ok;
+  }
   if (options.resume) return cmdResume(String(options.resume));
 
   if (options.hunt || options.level !== undefined) {
     const level = Math.max(1, Math.min(5, Number(options.level ?? 1)));
     const gameRepo = findGameRepo(options.repo);
-    const saveList = resolveSaves(options.saves ?? "fresh", gameRepo);
+    const saveZip = prepareSaveZip(options);
+    if (saveZip.exit !== undefined) return saveZip.exit;
+    // A Game export is one Save, hunted in this process.
+    const saveList = saveZip.file ? [null] : resolveSaves(options.saves ?? "fresh", gameRepo);
     const seed = Number(options.seed ?? Date.now() % 100000);
 
     const apiKey =
@@ -301,6 +378,9 @@ const main = async () => {
         level,
         seed: seed + index,
         saves: save ?? "fresh",
+        saveZip: saveZip.file,
+        importScenario: !options.noEmbeddedScenario,
+        hub: !options.noHub,
         turns: options.turns ? Number(options.turns) : null,
         ai,
         provider: options.provider ?? "gemini",
@@ -313,8 +393,15 @@ const main = async () => {
         harnessRoot: HARNESS_ROOT,
         maxAiCalls: Number(options.maxAiCalls ?? 0),
         cassetteMode: options.record ? "record" : "off",
-        command: `node cli.js --hunt --level ${level} --saves ${save ?? "fresh"} --seed ${seed + index}` +
-          (ai === "live" ? " --ai live" : ""),
+        command:
+          `node cli.js --hunt --level ${level} ` +
+          (saveZip.file ? `--save-zip ${saveZipArg(saveZip.file)}` : `--saves ${save ?? "fresh"}`) +
+          ` --seed ${seed + index}` +
+          (options.turns ? ` --turns ${options.turns}` : "") +
+          (ai === "live" ? " --ai live" : "") +
+          (options.branch ? ` --branch ${options.branch}` : "") +
+          (options.noEmbeddedScenario ? " --no-embedded-scenario" : "") +
+          (options.noHub ? " --no-hub" : ""),
         quiet: Boolean(options.quiet),
       });
       reports.push(result);
@@ -388,6 +475,9 @@ const main = async () => {
     return EXIT.error;
   }
 
+  const saveZip = prepareSaveZip(options);
+  if (saveZip.exit !== undefined) return saveZip.exit;
+
   const result = await runScenarios(names, {
     ai,
     cassetteMode: options.record ? "record" : options.replay ? "replay" : "off",
@@ -402,6 +492,9 @@ const main = async () => {
     fresh: Boolean(options.freshWorktree),
     geometry: options.geometry ?? "stock",
     fixture: options.fixture ?? null,
+    saveZip: saveZip.file,
+    importScenario: !options.noEmbeddedScenario,
+    hub: !options.noHub,
     provider: options.provider ?? "gemini",
     model: options.model ?? "",
     apiKey: apiKey ?? "",
