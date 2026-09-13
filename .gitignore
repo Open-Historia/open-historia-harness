@@ -26,8 +26,10 @@ cassettes/
 sandbox/
 
 # Game exports: players' campaigns, sent in with bug reports, and the zips the
-# harness makes itself. Someone's own Game, so never the public repo's.
-game-exports/
+# harness makes itself. Someone's own Game, so never the public repo's. Only the
+# README saying what the folder is for is tracked.
+game-exports/*
+!game-exports/README.md
 
 # Local-only testing: one-off investigations of player reports and game feature
 # branches, and the data they were built from. Name a scenario `<name>.local.js`
