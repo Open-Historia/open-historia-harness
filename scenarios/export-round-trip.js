@@ -3,7 +3,7 @@
 //
 // A turn is played first so the zip carries a Roll-back point. The sandbox Game
 // sits on the Stand-in scenario, which the game's export counts as a custom map,
-// so the zip carries that too: one run covers the bundle, the Roll-back points
+// so the zip carries that too: one run covers the Game bundle, the Roll-back points
 // and the embedded Scenario.
 //
 // The zip is kept at game-exports/harness/round-trip.zip, replacing the last
@@ -44,6 +44,13 @@ export default async ({ game, expect, log, session }) => {
   expect.that(Boolean(opened.snapshotsText), "the zip carries the Game's Roll-back points");
   expect.that(Boolean(opened.scenarioBundle), "the zip carries the Game's Scenario");
 
+  // As if opened on an install that has never seen this Scenario, the case a
+  // player's zip is usually in. Left under its own id, the game would find it
+  // already in the library and skip importing it, and the Scenario the zip
+  // carried would go untested.
+  const elsewhere = `${opened.bundle.scenarioRef.scenarioId}-exported-elsewhere`;
+  opened.bundle.scenarioRef = { ...opened.bundle.scenarioRef, scenarioId: elsewhere };
+
   const placed = await placeExport(session, opened);
   const check = await checkImport(session, { gameId: placed.gameId, sent: placed.sent, snapshotsText: opened.snapshotsText });
   for (const mismatch of check.mismatches) log.warn(mismatch.summary);
@@ -55,6 +62,9 @@ export default async ({ game, expect, log, session }) => {
     imported: placed.gameId,
   });
   expect.equal(placed.map.kind, "embedded", "the Game plays on the Scenario the zip carried");
+  expect.equal(placed.map.alreadyHere, false, "that Scenario was imported from the zip, not found already here");
+  const imported = (await readLibraryCatalog(session)).games?.find((entry) => entry.id === placed.gameId);
+  expect.equal(imported?.scenarioId, placed.map.scenarioId, "the imported Game points at the Scenario imported with it");
 
   const afterCatalog = await readLibraryCatalog(session);
   expect.equal(afterCatalog.activeGameId, exportedId, "importing did not change the active Game");

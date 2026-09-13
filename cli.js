@@ -13,7 +13,7 @@ import { buildReport, writeReport } from "./lib/report.js";
 import { HARNESS_ROOT, RUNS_DIR, listScenarios, runScenarios } from "./lib/runner.js";
 import { DEFAULT_SANDBOX_ROOT } from "./lib/session.js";
 import { pruneSandboxes } from "./lib/sandbox.js";
-import { configureSafety, resetSafety } from "./lib/safety.js";
+import { configureSafety, isInside, resetSafety } from "./lib/safety.js";
 import { DEFAULT_GAME_REPO, findGameRepo } from "./lib/target.js";
 import { pruneWorktrees } from "./lib/worktree.js";
 import { detectBlockers } from "./lib/compat.js";
@@ -130,9 +130,8 @@ const prepareSaveZip = (options) => {
  * often pasted into a public issue.
  */
 const saveZipArg = (file) => {
-  const relative = path.relative(exportsDir(), file);
-  if (!relative.startsWith("..") && !path.isAbsolute(relative)) {
-    return relative.replace(/\.zip$/i, "").split(path.sep).join("/");
+  if (isInside(file, exportsDir())) {
+    return path.relative(exportsDir(), file).replace(/\.zip$/i, "").split(path.sep).join("/");
   }
   const shown = hideHomeDir(file);
   return /\s/.test(shown) ? `"${shown}"` : shown;
@@ -235,7 +234,7 @@ const cmdDoctor = () => {
   const hubMaps = pruneHubCache({ keepDays: 14 });
   resetSafety();
 
-  say(`removed ${worktrees.length} worktree(s), ${sandboxes.length} stale sandbox(es), ${hubMaps.length} cached hub map(s)`);
+  say(`removed ${worktrees.length} worktree(s), ${sandboxes.length} stale sandbox(es), ${hubMaps.length} cached Hub scenario(s)`);
   return EXIT.ok;
 };
 
@@ -246,7 +245,7 @@ const cmdPrune = (options) => {
   const sandboxes = pruneSandboxes({ keepDays: Number(options.keepDays ?? 14) });
   const hubMaps = pruneHubCache({ keepDays: Number(options.keepDays ?? 14) });
   resetSafety();
-  say(`removed ${worktrees.length} worktree(s), ${sandboxes.length} sandbox(es), ${hubMaps.length} cached hub map(s)`);
+  say(`removed ${worktrees.length} worktree(s), ${sandboxes.length} sandbox(es), ${hubMaps.length} cached Hub scenario(s)`);
   return EXIT.ok;
 };
 
