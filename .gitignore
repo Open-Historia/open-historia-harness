@@ -25,6 +25,12 @@ cassettes/
 # Throwaway game data and git worktrees. Large, and recreated on every run.
 sandbox/
 
+# Game exports: players' campaigns, sent in with bug reports, and the zips the
+# harness makes itself. Someone's own Game, so never the public repo's. Only the
+# README saying what the folder is for is tracked.
+game-exports/*
+!game-exports/README.md
+
 # Local-only testing: one-off investigations of player reports and game feature
 # branches, and the data they were built from. Name a scenario `<name>.local.js`
 # to keep it out of the repo; it still runs as `node cli.js <name>.local`.

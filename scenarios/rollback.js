@@ -4,7 +4,23 @@ export const meta = {
   aiCallBudget: 0,
 };
 
-export default async ({ game, world, expect, log }) => {
+export default async ({ game, world, expect, log, session }) => {
+  // A Game export that carried Roll-back points: prove they work before playing,
+  // because the turn below makes a point of its own and would pass without them.
+  if (session.save.kind === "export" && session.save.rollbackPoints > 0) {
+    const carried = await game.snapshots();
+    expect.equal(carried.length, session.save.rollbackPoints, "every Roll-back point the zip carried is there to use");
+    // Newest first, as the game stores them.
+    const newest = carried[0];
+    const expected = { round: newest?.state?.game?.round ?? newest?.round, gameDate: newest?.state?.game?.gameDate };
+    const back = await game.rollback(0);
+    expect.that(back.ok, "rolling back to a carried Roll-back point does not throw", { error: back.error?.message });
+    const there = await world.snapshot();
+    expect.equal(there.round, expected.round, "the carried point restores its round");
+    expect.equal(there.gameDate, expected.gameDate, "and its date");
+    log.info(`rolled back to the newest carried Roll-back point: round ${there.round}, ${there.gameDate}`);
+  }
+
   const before = await world.snapshot();
   log.info(`starting at round ${before.round}, ${before.gameDate}`);
 
