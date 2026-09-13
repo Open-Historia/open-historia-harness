@@ -56,6 +56,39 @@ through the wrong file.
 
 If an AI agent is driving this, point it at [AGENTS.md](AGENTS.md).
 
+## Opening a player's Game export
+
+A player can export one Game as a `.zip` from the Games tab, or attach one to a bug report from
+Settings → Diagnostics. The harness can hunt in it or run any scenario on it:
+
+```
+node cli.js --hunt --level 1 --save-zip C:\path\to\modern-day-session-game.zip --branch upstream/beta
+node cli.js rollback --save-zip modern-day-session-game --branch upstream/beta
+node cli.js --check-exports --branch upstream/beta
+```
+
+Drop zips into `game-exports/` (gitignored) to use them by name; `--levels` lists them. A target that
+predates Game exports stops with exit 5 and says which branch to use.
+
+The zip is opened with **the game's own reader** and imported through **the game's own routes**, in
+the order the Games tab uses — never unpacked by the harness ([ADR-0001](docs/adr/0001-open-exports-through-the-games-own-code.md)).
+So every zip run is also a test of the player-facing import: before any turn, the imported Game is
+compared with the zip part by part, and a difference is an **Import finding**, reported on its own and
+never blamed on the player's Save.
+
+The Game plays on its own map when it can get it: carried in the zip (imported unless
+`--no-embedded-scenario`), or downloaded from the community hub (unless `--no-hub`; cached per map
+version, and fetched through the game server's own proxy, from the hosts it allows). A built-in map, or
+one the player never had, plays on the Stand-in scenario instead, with a warning at the top of the
+report when that may make region findings unreliable.
+
+The zip's `settings.txt` is quoted in the report. With `--ai live` on the player's own provider, the
+run uses their model and reasoning setting and says so; on a different provider it warns instead.
+
+`export-round-trip` exports a played sandbox Game through the game's own zip code, reopens it and
+imports it back, and asserts nothing was lost. It needs no AI, and it keeps its zip at
+`game-exports/harness/round-trip.zip` for `--save-zip harness/round-trip`.
+
 ## The three things it is for
 
 **Seeing the game as data.** `world.snapshot()` returns ownership, units, events, polities and

@@ -51,6 +51,12 @@ Ask them together, in one message, and give them the context to answer:
    output, which is where corruption actually lives — so **suggest `all`** if they
    have saves and are not in a hurry.
 
+   If they are reproducing a **player's bug report** that came with a Game export
+   (a `.zip`), use that instead: `--save-zip <path>`, or its name if it is in
+   `game-exports/` (`--levels` lists those too). One zip per run, never combined
+   with `--saves`. It needs a game branch that has Game exports — if the run exits
+   5, add `--branch upstream/beta`.
+
 3. **AI provider and key?** The harness runs perfectly well with **no key at all**,
    using the game's deterministic fallback turn. That tests the whole engine except
    the model itself, and costs nothing. Only ask for a key if they want to test
@@ -99,6 +105,7 @@ node cli.js --hunt --level 2                      # fresh scenario
 node cli.js --hunt --level 2 --saves all          # fresh plus every real save
 node cli.js --hunt --level 4 --saves modern-day-session --seed 777
 node cli.js --hunt --level 3 --ai live            # with a real model
+node cli.js --hunt --level 1 --save-zip <zip> --branch upstream/beta   # a player's Game export
 ```
 
 Useful flags: `--turns <n>` to override the level's turn count, `--seed <n>` to
@@ -150,6 +157,18 @@ under "Already present before the run started". Never tell the user their code
 broke something that was already broken in their save — it sends them hunting
 through the wrong code. Do say the save carries invalid data, because that is
 itself a bug that happened at some point.
+
+**On a Game export, read the Save block at the top first.** It says which zip
+was opened, which map the Game played on, what `settings.txt` recorded, and
+whether the import check passed. Two things there change how to read the rest:
+
+- **Import findings** are the game's *importer* losing or changing data. They are
+  never the player's Save and never the run — say so plainly, and lead with them.
+- A **Stand-in warning** means the Game played on the harness's own map instead of
+  its real one, so findings about regions may not be real. Say that too.
+
+If the Settings record shows a different provider or model from the run's, say a
+bug that did not reproduce may only need their model.
 
 **Severity is about players, not drama.** A medium finding at level 1 matters more
 than a high finding at level 5, because level 1 is what a real person does.
