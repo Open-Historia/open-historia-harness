@@ -1,9 +1,29 @@
 {
-  "_comment": "Copy to harness.config.json (gitignored), or better: put it at %USERPROFILE%/.open-historia-harness.json so no .gitignore mistake can ever expose it.",
+  "//": "Copy to %USERPROFILE%/.open-historia-harness.json. Keys never belong in either repo.",
+
   "provider": "gemini",
-  "gemini": { "apiKey": "", "model": "gemini-3.5-flash-lite" },
-  "openaiCompatible": { "endpoint": "http://localhost:11434/v1", "model": "" },
-  "rateLimit": { "minGapMs": 6500, "maxRetries": 3 },
-  "budget": { "perRun": 0, "perDay": 0 },
-  "reasoning": false
+
+  "gemini": {
+    "apiKey": "AIza...",
+    "model": "gemini-3.5-flash-lite"
+  },
+
+  "nvidia": {
+    "apiKey": "nvapi-...",
+    "model": "nvidia/llama-3.3-nemotron-super-49b-v1.5"
+  },
+
+  "//endpoint": "Each gateway has a default address; set 'endpoint' in a block to override it.",
+
+  "rateLimit": {
+    "//": "Milliseconds between provider calls. 6500 suits a fresh scenario; a large save sends 86k-token prompts and needs 30000 to stay under a free tier's tokens-per-minute limit.",
+    "minGapMs": 6500,
+    "maxRetries": 3
+  },
+
+  "budget": {
+    "//": "0 means no ceiling; the provider's own limit still applies.",
+    "perRun": 0,
+    "perDay": 0
+  }
 }

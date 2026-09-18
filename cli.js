@@ -83,15 +83,28 @@ Game exports (a player's exported .zip; hunts and scenario runs)
 Run
   --ai off|live        provider calls (default: off, uses the deterministic fallback)
   --key <k>            API key (prefer OH_HARNESS_GEMINI_KEY or the config file)
-  --provider <name>    gemini | openai | anthropic | openai-compatible
+  --provider <name>    gemini | nvidia | openrouter | groq | ollama | openai |
+                       anthropic | openai-compatible. The first four are harness
+                       names for an OpenAI-compatible gateway plus its address;
+                       each reads its own block in the config file, so several
+                       keys live side by side and --provider picks one.
+  --endpoint <url>     override the address for an OpenAI/Anthropic-compatible
+                       provider (a self-hosted gateway, a preview host)
   --model <name>
   --record [name]      record real model responses to cassettes/<name>
   --replay [name]      replay them: no network, no quota, deterministic
   --replay-mode strict|auto   strict fails on a miss (a changed prompt), auto falls through
   --max-ai-calls <n>   ceiling for this run
   --max-ai-calls-per-day <n>  ceiling shared across runs, survives restarts
+  --min-gap-ms <n>     seconds between provider calls, in ms (default 6500). Raise it
+                       for a large save: big prompts hit a tokens-per-minute limit
+                       long before they hit a requests-per-minute one.
+  --max-retries <n>    429/5xx retries before the run is called rate-limited (default 3)
   --geometry stock|full
   --fixture <gameId>   seed from a real save in the main checkout
+  --fixture-source <path>   read that save from ANOTHER root (a copy of a player's
+                       data dir), instead of the game repo. The save is copied into
+                       the sandbox and the source is never written to.
   --force              run AI-only scenarios against the fallback
   --keep               keep the sandbox and worktree for inspection
   --max-runtime <min>  absolute ceiling (default 30)
@@ -137,11 +150,19 @@ const saveZipArg = (file) => {
   return /\s/.test(shown) ? `"${shown}"` : shown;
 };
 
-const sayNoKey = () => {
-  say("No API key found. Set one of:");
-  say("  OH_HARNESS_GEMINI_KEY=<key>            (environment)");
-  say(`  ${path.join(process.env.USERPROFILE ?? "~", ".open-historia-harness.json")}   {"gemini":{"apiKey":"..."}}`);
-  say("  harness.config.json in this repo       (gitignored)");
+const sayNoKey = (name = "gemini") => {
+  say(`No API key found for "${name}". Set one of:`);
+  for (const variable of KEY_ENV[name] ?? [`OH_HARNESS_${name.toUpperCase()}_KEY`]) {
+    say(`  ${variable}=<key>                  (environment)`);
+  }
+  say(`  ${path.join(process.env.USERPROFILE ?? "~", ".open-historia-harness.json")}`);
+  say(`      {"provider":"${name}","${name}":{"apiKey":"...","model":"..."}}`);
+  say("");
+  say("Providers the harness knows by name, and what they mean to the engine:");
+  for (const [alias, spec] of Object.entries(PROVIDER_ALIASES)) {
+    say(`  ${alias.padEnd(12)} ${spec.provider} at ${spec.endpoint}`);
+  }
+  say("  gemini / openai / anthropic     the engine's own, no endpoint needed");
   say("");
   say("Or run without --ai to use the deterministic fallback, which costs nothing.");
 };
@@ -320,11 +341,11 @@ const main = async () => {
     const saveList = saveZip.file ? [null] : resolveSaves(options.saves ?? "fresh", gameRepo);
     const seed = Number(options.seed ?? Date.now() % 100000);
 
-    const apiKey =
-      options.key ?? process.env.OH_HARNESS_GEMINI_KEY ?? process.env.GEMINI_API_KEY ?? readConfigKey();
+    const who = resolveProvider(options);
+    const apiKey = who.apiKey;
     const ai = options.ai === "live" || options.ai === true ? "live" : "off";
     if (ai === "live" && !apiKey) {
-      sayNoKey();
+      sayNoKey(who.name);
       return EXIT.error;
     }
 
@@ -382,8 +403,9 @@ const main = async () => {
         hub: !options.noHub,
         turns: options.turns ? Number(options.turns) : null,
         ai,
-        provider: options.provider ?? "gemini",
-        model: options.model ?? "",
+        provider: who.provider,
+        model: who.model,
+        endpoint: who.endpoint,
         apiKey: apiKey ?? "",
         repo: options.repo,
         branch: options.branch ?? null,
@@ -459,19 +481,20 @@ const main = async () => {
     return EXIT.ok;
   }
 
-  const apiKey =
-    options.key ??
-    process.env.OH_HARNESS_GEMINI_KEY ??
-    process.env.GEMINI_API_KEY ??
-    readConfigKey();
+  const who = resolveProvider(options);
+  const pacing = resolvePacing(options);
 
   // Replay needs provider calls routed to the hook even with no key, since a
   // cassette answers without the network.
   const ai = options.replay ? "replay" : options.ai === "live" || options.ai === true ? "live" : "off";
 
-  if (ai === "live" && !apiKey) {
-    sayNoKey();
+  if (ai === "live" && !who.apiKey) {
+    sayNoKey(who.name);
     return EXIT.error;
+  }
+  if (ai === "live") {
+    say(`provider: ${who.name}${who.name === who.provider ? "" : ` (${who.provider})`}` +
+      `${who.model ? ` · ${who.model}` : ""}${who.endpoint ? ` · ${who.endpoint}` : ""}`);
   }
 
   const saveZip = prepareSaveZip(options);
@@ -486,17 +509,22 @@ const main = async () => {
     replayMode: options.replayMode ?? "auto",
     maxAiCalls: Number(options.maxAiCalls ?? 0),
     maxAiCallsPerDay: Number(options.maxAiCallsPerDay ?? 0),
+    minGapMs: pacing.minGapMs,
+    maxRetries: pacing.maxRetries,
     repo: options.repo,
     branch: options.branch ?? null,
     fresh: Boolean(options.freshWorktree),
     geometry: options.geometry ?? "stock",
     fixture: options.fixture ?? null,
+    fixtureSource: options.fixtureSource ?? null,
     saveZip: saveZip.file,
     importScenario: !options.noEmbeddedScenario,
     hub: !options.noHub,
-    provider: options.provider ?? "gemini",
-    model: options.model ?? "",
-    apiKey: apiKey ?? "",
+    provider: who.provider,
+    model: who.model,
+    endpoint: who.endpoint,
+    customParams: who.customParams,
+    apiKey: who.apiKey ?? "",
     keep: Boolean(options.keep),
     force: Boolean(options.force),
     quiet: Boolean(options.quiet),
@@ -515,23 +543,93 @@ const main = async () => {
   return result.exitCode;
 };
 
-/** The recommended home for a real key: outside every repo. */
-function readConfigKey() {
+/** The recommended home for real keys: outside every repo. */
+function readConfig() {
   const candidates = [
     path.join(process.env.USERPROFILE ?? process.env.HOME ?? "", ".open-historia-harness.json"),
     path.join(HARNESS_ROOT, "harness.config.json"),
   ];
   for (const file of candidates) {
     try {
-      const config = JSON.parse(fs.readFileSync(file, "utf8"));
-      const key = config?.gemini?.apiKey || config?.apiKey;
-      if (key) return key;
+      return JSON.parse(fs.readFileSync(file, "utf8"));
     } catch {
       // Missing or unreadable config is the normal case.
     }
   }
-  return null;
+  return {};
 }
+
+/**
+ * Harness-level provider names.
+ *
+ * The GAME knows five providers; several services are the same one of those
+ * with a different address in front of it. NVIDIA's model API speaks
+ * /chat/completions, so to the engine it is "openai-compatible" pointed at
+ * NVIDIA's host — but nobody wants to type that, or to remember the URL, every
+ * time they pick a model. An alias here is a name plus the endpoint that makes
+ * it true; anything else is passed through to the engine unchanged.
+ */
+const PROVIDER_ALIASES = {
+  nvidia: { provider: "openai-compatible", endpoint: "https://integrate.api.nvidia.com/v1" },
+  arliai: { provider: "openai-compatible", endpoint: "https://api.arliai.com/v1" },
+  openrouter: { provider: "openai-compatible", endpoint: "https://openrouter.ai/api/v1" },
+  groq: { provider: "openai-compatible", endpoint: "https://api.groq.com/openai/v1" },
+  ollama: { provider: "openai-compatible", endpoint: "http://localhost:11434/v1" },
+};
+
+/** Environment variables that hold a key, by the name the config block uses. */
+const KEY_ENV = {
+  gemini: ["OH_HARNESS_GEMINI_KEY", "GEMINI_API_KEY"],
+  nvidia: ["OH_HARNESS_NVIDIA_KEY", "NVIDIA_API_KEY"],
+  openrouter: ["OH_HARNESS_OPENROUTER_KEY", "OPENROUTER_API_KEY"],
+  groq: ["OH_HARNESS_GROQ_KEY", "GROQ_API_KEY"],
+  arliai: ["OH_HARNESS_ARLIAI_KEY", "ARLIAI_API_KEY"],
+  openai: ["OH_HARNESS_OPENAI_KEY", "OPENAI_API_KEY"],
+  anthropic: ["OH_HARNESS_ANTHROPIC_KEY", "ANTHROPIC_API_KEY"],
+};
+
+/**
+ * Who is answering this run: the name the user picked, the engine provider it
+ * means, and the key, model and endpoint that go with it.
+ *
+ * Precedence is the usual one — a flag beats the environment, which beats the
+ * config file — applied per field, so `--model` can override one block's model
+ * without also having to restate its key.
+ */
+const resolveProvider = (options) => {
+  const config = readConfig();
+  const name = String(options.provider ?? config.provider ?? "gemini");
+  const alias = PROVIDER_ALIASES[name] ?? null;
+  const block = config[name] ?? {};
+
+  const fromEnv = (KEY_ENV[name] ?? []).map((key) => process.env[key]).find(Boolean);
+  // `config.apiKey` is the old single-key shape, kept working on purpose: a
+  // config written before there was more than one provider must not stop a run.
+  const apiKey = options.key ?? fromEnv ?? block.apiKey ?? (name === "gemini" ? config.apiKey : null) ?? null;
+
+  return {
+    name,
+    provider: alias?.provider ?? block.provider ?? name,
+    apiKey,
+    model: options.model ?? block.model ?? "",
+    endpoint: options.endpoint ?? block.endpoint ?? alias?.endpoint ?? "",
+    // Extra body fields for the provider, straight from the config block. This
+    // is where a reasoning model is told not to think: DeepSeek V4 spends five
+    // sixths of its output on a chain of thought that is thrown away, and
+    // `chat_template_kwargs: {thinking: false}` returns the same answer in a
+    // fifth of the time.
+    customParams: block.customParams ?? null,
+  };
+};
+
+/** Pacing defaults from the config, so a slow provider does not need flags. */
+const resolvePacing = (options) => {
+  const rate = readConfig().rateLimit ?? {};
+  return {
+    minGapMs: Number(options.minGapMs ?? rate.minGapMs ?? 0),
+    maxRetries: Number(options.maxRetries ?? rate.maxRetries ?? 0),
+  };
+};
 
 main()
   .then((code) => {
